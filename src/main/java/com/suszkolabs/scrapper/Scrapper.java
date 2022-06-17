@@ -1,22 +1,14 @@
 package com.suszkolabs.scrapper;
 
-import com.squareup.okhttp.*;
 import com.suszkolabs.entity.Teacher;
 import org.jsoup.Jsoup;
 import org.jsoup.Connection;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-import org.openqa.selenium.By;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.chrome.ChromeDriver;
-import io.github.bonigarcia.wdm.WebDriverManager;
 
 import java.io.IOException;
-import java.net.URL;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class Scrapper {
@@ -25,9 +17,21 @@ public class Scrapper {
     private static final String USERNAME = System.getenv("username");
     private static final String PASSWORD = System.getenv("password");
     private static final String URL_PREFIX = "https://polwro.com/";
+    private static final Map<String, Integer> titlePriorities;
+
+    static{
+        titlePriorities = new HashMap<>();
+        titlePriorities.put("prof", 1);
+        titlePriorities.put("dr", 2);
+        titlePriorities.put("hab", 3);
+        titlePriorities.put("doc", 4);
+        titlePriorities.put("mgr", 5);
+        titlePriorities.put("inz", 6);
+        titlePriorities.put("inż", 7);
+    }
 
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
 
         final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.115 Safari/537.36";
         final String USERNAME = System.getenv("username");
@@ -72,76 +76,15 @@ public class Scrapper {
         final String SPORTOWCY_URL = "https://polwro.com/f,sportowcy,12";
         final String POZOSTALI_URL = "https://polwro.com/f,inni,42";
 
-        /*
-        List<String> URLS = List.of(MATEMATYCY_URL, FIZYCY_URL, CHEMICY_URL, ELEKTRONICY_URL,
-                INFORMATYCY_URL, JEZYKOWCY_URL, HUMANISCI_URL, SPORTOWCY_URL, POZOSTALI_URL);
+        List<String> URLs = extractTeacherPaginationURLs(MATEMATYCY_URL, login);
+        System.out.println(URLs);
+        List<Teacher> teacherModels = extractTeacherModels(URLs, login, "matematycy");
+        teacherModels.forEach(System.out::println);
 
-        URLS.stream().forEach(URL -> {
-            try {
-                System.out.println(extractReviewPages(URL, login) + "\n\n");
-                Thread.sleep(350);
-            } catch (IOException e) {
-                e.printStackTrace();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        });
-         */
-        List<String> mathematicianUrls = extractReviewPages(MATEMATYCY_URL, login);
-        //System.out.println(mathematicianUrls);
-
-        Connection.Response teacherPage = Jsoup.connect(mathematicianUrls.get(0))
-                .method(Connection.Method.GET)
-                .cookies(login.cookies())
-                .userAgent(USER_AGENT)
-                .execute();
-
-        Document doc = teacherPage.parse();
-
-        Elements teachers = doc.select(".img.folder, .img.folder_hot");
-
-        // dla każdego z kontenerów zrób
-        /*
-            1. utwórz nauczyciela
-            2. dodaj detailsLink
-            3. dodaj imię, nazwisko i tytuł
-         */
-
-        Teacher teacher = new Teacher();
-        teacher.setCategory("matematycy");
-
-        Element test = teachers.get(0);
-        double averageRating = Double.parseDouble(test.select("> div:nth-child(1)").text().replace(',','.'));
-        teacher.setAverageRating(averageRating);
-
-        Element href = test.selectFirst(".vf");
-
-        String detailsLink = href.attr("href");
-        teacher.setDetailsLink(detailsLink);
-
-        String teacherDetails = href.text();
-
-        List<String> filteredDetails = Arrays.stream(teacherDetails.split("[,s+]"))
-                .filter(detail -> !detail.equals(" "))
-                .map(String::trim)
-                .toList();
-
-        teacher.setFirstName(filteredDetails.get(0));
-        teacher.setLastName(filteredDetails.get(1));
-        teacher.setAcademicTitle(filteredDetails.get(2));
-
-        System.out.println(teacher);
-
-        Connection.Response reviewPage = Jsoup.connect(URL_PREFIX + teacher.getDetailsLink())
-                .method(Connection.Method.GET)
-                .cookies(login.cookies())
-                .userAgent(USER_AGENT)
-                .execute();
-
-        System.out.println(reviewPage.body());
+        // TODO - add equals for teacher to prevent duplicate threads
     }
 
-    public static List<String> extractReviewPages(String pageUrl, Connection.Response login) throws IOException {
+    public static List<String> extractTeacherPaginationURLs(String pageUrl, Connection.Response login) throws IOException {
         Connection.Response homePage = Jsoup.connect(pageUrl)
                 .method(Connection.Method.GET)
                 .cookies(login.cookies())
@@ -158,5 +101,73 @@ public class Scrapper {
         hrefs.add(0, pageUrl);
 
         return hrefs;
+    }
+
+    public static List<Teacher> extractTeacherModels(List<String> teacherPaginationURLs, Connection.Response login, String category) throws IOException, InterruptedException {
+        List<Teacher> teachers = new ArrayList<>();
+        String[] academicTitles = {"doc", "Doc", "mgr", "Mgr", "inż", "Inż", "inz", "Inz", "hab", "Hab", "dr", "Dr", "prof", "Prof"};
+
+        for(String URL: teacherPaginationURLs){
+            Connection.Response teachersPage = Jsoup.connect(URL)
+                    .method(Connection.Method.GET)
+                    .cookies(login.cookies())
+                    .userAgent(USER_AGENT)
+                    .execute();
+
+            Document document = teachersPage.parse();
+            Elements teacherDivs = document.select(".img.folder, .img.folder_hot");
+
+            for(Element element: teacherDivs){
+                Teacher teacher = new Teacher();
+                teacher.setCategory(category);
+
+                double averageRating = Double.parseDouble(element.select("> div:nth-child(1)").text().replace(',','.'));
+                teacher.setAverageRating(averageRating);
+
+                Element href = element.selectFirst(".vf");
+
+                String detailsLink = href.attr("href");
+                teacher.setDetailsLink(detailsLink);
+
+                String teacherDetails = href.text();
+
+                teacherDetails = teacherDetails.replace(".", "")
+                        .replace(",", "")
+                        .replace(";", "")
+                        .replace(":", "")
+                        .replace("'", "");
+
+                List<String> containedTitles = new ArrayList<>();
+
+                for(String title: academicTitles){
+                    int titleIndex = teacherDetails.indexOf(title);
+                    if(titleIndex != -1){
+                        teacherDetails = teacherDetails.replace(title, "").trim();
+                        containedTitles.add(title.toLowerCase(Locale.ROOT));
+                    }
+                }
+
+                String fullTitle = constructFullTitle(containedTitles);
+
+                teacher.setAcademicTitle(fullTitle.trim());
+                teacher.setFullName(teacherDetails);
+                teachers.add(teacher);
+            }
+            Thread.sleep(400);
+        }
+        return teachers;
+    }
+
+    private static String constructFullTitle(List<String> titleParts){
+        String fullTitle = "";
+        Map<Integer, String> titlePartPriorities = new TreeMap<>();
+
+        for(String title: titleParts)
+            titlePartPriorities.put(titlePriorities.get(title), title);
+
+        for(String titlePart: titlePartPriorities.values()) {
+            fullTitle += titlePart + " ";
+        }
+        return fullTitle.trim();
     }
 }
