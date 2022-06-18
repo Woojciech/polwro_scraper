@@ -8,7 +8,12 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
@@ -81,26 +86,110 @@ public class Scrapper {
         final String SPORTOWCY_URL = "https://polwro.com/f,sportowcy,12";
         final String POZOSTALI_URL = "https://polwro.com/f,inni,42";
 
-        long t1 = System.nanoTime();
+        /*
+        List<String> categoryURLs = List.of(MATEMATYCY_URL, FIZYCY_URL, INFORMATYCY_URL,
+                CHEMICY_URL, ELEKTRONICY_URL, JEZYKOWCY_URL, HUMANISCI_URL, SPORTOWCY_URL, POZOSTALI_URL);
+
         List<String> URLs = extractTeacherPaginationURLs(POZOSTALI_URL, login);
         List<Teacher> teacherModels = extractTeacherModels(URLs, login, "sportowcy");
-        //System.out.println(teacherModels.get(19));
-        //teacherModels.forEach(teacher -> System.out.println(teacher));
-        //System.out.println(teacherModels);
-        //List<Teacher> teacherTest = List.of(teacherModels.get(19), teacherModels.get(20), teacherModels.get(21));
-        System.out.println(fetchTeachersReviews(teacherModels, login));
-        long t2 = System.nanoTime();
+        fetchTeachersReviews(teacherModels, login);=
+         */
+        try {
+            buildDatabaseScript(login);
+        }catch (SQLException e){
+            e.printStackTrace();
+        }
 
-        System.out.println((t2 - t1)/1000000000);
         // TODO - add equals for teacher and prevent duplicate threads
         // TODO - add null mechanism for teacherPaging extraction
         // TODO - add last refresh
+
+        // TODO - fetchTeacherPagination -> refactor dla sytuacji z wieloma stronami ;)
+    }
+
+    public static void buildDatabaseScript(Connection.Response login) throws IOException, InterruptedException, SQLException {
+        final String MATEMATYCY_URL = "https://polwro.com/f,matematycy,6";
+        final String FIZYCY_URL = "https://polwro.com/f,fizycy,7";
+        final String INFORMATYCY_URL = "https://polwro.com/f,informatycy,25";
+        final String CHEMICY_URL = "https://polwro.com/f,chemicy,8";
+        final String ELEKTRONICY_URL = "https://polwro.com/f,elektronicy,9";
+        final String JEZYKOWCY_URL = "https://polwro.com/f,jezykowcy,10";
+        final String HUMANISCI_URL = "https://polwro.com/f,humanisci,11";
+        final String SPORTOWCY_URL = "https://polwro.com/f,sportowcy,12";
+        final String POZOSTALI_URL = "https://polwro.com/f,inni,42";
+
+        java.sql.Connection connection = DriverManager.getConnection("jdbc:mysql://localhost:3306/test_opinie", "root", "admin");
+
+        List<String> categoryURLs = List.of(SPORTOWCY_URL, MATEMATYCY_URL, FIZYCY_URL, INFORMATYCY_URL,
+                CHEMICY_URL, ELEKTRONICY_URL, JEZYKOWCY_URL, HUMANISCI_URL, SPORTOWCY_URL, POZOSTALI_URL);
+        List<String> categoryNames = List.of("sportowcy", "matematycy", "fizycy", "informatycy", "chemicy", "elektronicy",
+                "językowcy", "humaniści", "sportowcy", "pozostali");
+
+        for(int i = 0; i < categoryURLs.size(); i++){
+            String URL = categoryURLs.get(i);
+            String category = categoryNames.get(i);
+
+            // INFO: all pages from certain category
+            List<String> teacherPagesURLs = extractTeacherPaginationURLs(URL, login);
+            // INFO: all teachers from certain category
+            List<Teacher> teacherModels = extractTeacherModels(teacherPagesURLs, login, category);
+            // INFO: reviews of all teachers from certain category
+            fetchTeachersReviews(teacherModels, login);
+
+            // INFO: part responsible for database setup script creation
+            try(BufferedWriter bwriter = new BufferedWriter(new FileWriter("src/main/resources/opinie_setup_test.sql", true))) {
+
+                bwriter.newLine();
+                bwriter.newLine();
+
+                for (Teacher teacher : teacherModels) {
+                    String queryTeacher = "INSERT INTO teacher(category, full_name, academic_title, average_rating, details_link) VALUES(?, ?, ?, ?, ?)";
+                    PreparedStatement ps = connection.prepareStatement(queryTeacher);
+                    ps.setString(1, teacher.getCategory().replace("'", "\\'"));
+                    ps.setString(2, teacher.getFullName().replace("'", "\\'"));
+                    ps.setString(3, teacher.getAcademicTitle().replace("'", "\\'"));
+                    ps.setDouble(4, teacher.getAverageRating());
+                    ps.setString(5, teacher.getDetailsLink().replace("'", "\\'"));
+
+                    bwriter.write(ps.toString().split("com.mysql.cj.jdbc.ClientPreparedStatement:")[1].trim() + ";");
+                    bwriter.newLine();
+
+                    for(Review review: teacher.getReviews()){
+                        // INFO: avoids scam threads and a couple of poorly formatted ones (just a couple)
+                        if(review.getCourseName().length() < 200 && review.getTitle().length() < 200) {
+                            String queryReview = "INSERT INTO review(course_name, given_rating, title, review, reviewer, post_date, teacher_id)" +
+                                    " VALUES(?, ?, ?, ?, ?, ?, ?)";
+                            ps = connection.prepareStatement(queryReview);
+                            ps.setString(1, review.getCourseName().replace("'", "\\'"));
+                            ps.setDouble(2, review.getGivenRating());
+                            ps.setString(3, review.getTitle().replace("'", "\\'"));
+                            ps.setString(4, review.getReview().replace("'", "\\'"));
+                            ps.setString(5, review.getReviewer().replace("'", "\\'"));
+                            ps.setString(6, review.getPostDate().replace("'", "\\'"));
+                            ps.setInt(7, review.getTeacherId());
+
+                            bwriter.write(ps.toString().split("com.mysql.cj.jdbc.ClientPreparedStatement:")[1].trim() + ";");
+                            bwriter.newLine();
+                        }
+                    }
+
+                    bwriter.newLine();
+                    bwriter.newLine();
+                }
+
+                bwriter.write("COMMIT;");
+            }catch(IOException e){
+                e.printStackTrace();
+            }
+            break;
+        }
+
     }
 
     public static List<Teacher> fetchTeachersReviews(List<Teacher> teachers, Connection.Response login) throws IOException, InterruptedException {
 
         for(Teacher teacher: teachers) {
-            // fetch all review pages URLs starting from teacher homePage
+            // INFO: fetch all review pages URLs starting from teacher homePage
             String firstURL = URL_PREFIX + teacher.getDetailsLink();
             List<String> urls = extractTeacherReviewsPaginationURLs(firstURL, login);
 
@@ -113,7 +202,7 @@ public class Scrapper {
                         .cookies(login.cookies())
                         .execute();
 
-                Thread.sleep(200);
+                Thread.sleep(500);
 
                 Document doc = reviewPage.parse();
                 Elements posts = doc.select(".gradient_post");
@@ -122,16 +211,14 @@ public class Scrapper {
                     Element postContents = elem.selectFirst(".postBody");
                     Element reviewBody = postContents.selectFirst("span[itemprop=\"reviewBody\"]");
 
-                    //String courseName = reviewBody.select(" > :first-child").text().trim();
                     double givenRating = Double.parseDouble(postContents.selectFirst("span[itemprop=\"ratingValue\"]")
                             .text().trim().replace(",", "."));
-                    //String title = reviewBody.select(" > :nth-child(4)").text().trim();
                     Elements titles = reviewBody.select("span[style=\"font-weight: bold\"]");
 
                     String courseName = "";
                     String title = "";
 
-                    // code responsible for detecting alternative review formats
+                    // INFO: code responsible for detecting alternative review formats
                     if(titles.size() >= 2) {
                         courseName = titles.get(0).text().trim();
                         title = titles.get(1).text().trim();
@@ -143,13 +230,12 @@ public class Scrapper {
                     String review = reviewBody.text();
                     String reviewer = elem.select(".ll").get(1).select("span").get(1).text();
 
-                    // TODO - unclosed group near index ... Kurs: Analiza matematyczna 1 i 2 (ćwiczenia -> is treated as invalid regex pattern
                     // WARNING: title and coursename modification have to be conducted AFTER review modification (review depends on those)
-                    if(!courseName.equals("") && !title.equals("")) {
-                        review = review.replaceFirst(Pattern.quote(courseName), "").replaceFirst(Pattern.quote(title), "").trim();
-                        title = title.replaceFirst("Ocena opisowa:", "").replaceFirst("Descriptive rating:", "").trim();
-                        courseName = courseName.replaceFirst("Kurs:", "").replaceFirst("Course:", "").trim();
-                    }
+                    //if(!courseName.equals("") && !title.equals("")) {
+                    review = review.replaceFirst(Pattern.quote(courseName), "").replaceFirst(Pattern.quote(title), "").trim();
+                    title = title.replaceFirst("Ocena opisowa:", "").replaceFirst("Descriptive rating:", "").trim();
+                    courseName = courseName.replaceFirst("Kurs:", "").replaceFirst("Course:", "").trim();
+                    //}
 
                     Element postDateDiv = elem.selectFirst(".post_date");
 
@@ -161,11 +247,9 @@ public class Scrapper {
                                     .map(e -> Integer.parseInt(e.trim()))
                                     .toList();
                     LocalDateTime dateTime = LocalDateTime.of(dateParts.get(0), dateParts.get(1), dateParts.get(2), dateParts.get(3), dateParts.get(4));
-                    String postDate = dateTime.format(DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm"));
+                    String postDate = dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
 
                     Review finalReview = new Review(courseName, givenRating, title, review, reviewer, postDate, teacher.getId());
-
-                    //System.out.println(finalReview);
                     teacher.addReview(finalReview);
                 }
                 Thread.sleep(400);
@@ -189,19 +273,6 @@ public class Scrapper {
         finalHrefs.add(pageURL);
 
         Optional<Element> elem = Optional.ofNullable(doc.selectFirst(".pagination"));
-        /*
-        elem.ifPresent(element -> {
-            List<String> hrefs = element.select(".postmenu").stream()
-                    .map(e -> e.attr("href"))
-                    .collect(Collectors.toList());
-
-            // "next page" button generates duplicate URL
-            if(hrefs.size() > 1)
-                hrefs.remove(hrefs.size() - 1);
-
-            finalHrefs.addAll(hrefs);
-        });
-         */
 
         elem.ifPresent(element -> {
             List<String> hrefs = element.select(".postmenu").stream()
@@ -240,23 +311,6 @@ public class Scrapper {
 
         System.out.println("LOG: FINALHREFS = " + finalHrefs);
 
-        /*
-        //__________________________________________________________________________________________//
-        String teacherHref = pageURL.split(URL_PREFIX)[1];
-        System.out.println(teacherHref);
-        String hrefBegin = hrefs.get(0);
-        String hrefEnd = hrefs.get(hrefs.size() - 1);
-        int start = Integer.parseInt(hrefBegin.split("start=")[1]);
-        int end = Integer.parseInt(hrefEnd.split("start=")[1]);
-
-        int difference = end - start;
-
-        for(int i = 25; i < end; i += 25){
-            hrefs.add(URL_PREFIX + teacherHref + "start=" + start + i);
-        }
-        //___________________________________________________________________________________________//
-         */
-
         return finalHrefs;
     }
 
@@ -271,15 +325,47 @@ public class Scrapper {
 
         Elements elem = doc.select(".pagination").first().select(".postmenu");
 
+        // TODO - sportowcy fetch repair!!!!
+        List<String> finalHrefs = new ArrayList<>();
+        finalHrefs.add(pageURL);
+
         List<String> hrefs = elem.stream()
                 .map(e -> String.format("%s%s", URL_PREFIX, e.attr("href")))
                 .collect(Collectors.toList());
 
+        if(hrefs.size() > 1)
+            hrefs.remove(hrefs.size() - 1);
+
+        System.out.println("LOG: HREFS = " + hrefs);
+
+        // INFO: different strategy taken when there is more than 7 hrefs (paging differs)
+        if(hrefs.size() > 2) {
+            hrefs.remove(hrefs.size() - 1);
+            String teacherHref = pageURL.split(URL_PREFIX)[1];
+
+            String hrefBegin = hrefs.get(0);
+            finalHrefs.add(hrefBegin);
+
+            String hrefEnd = hrefs.get(hrefs.size() - 1);
+
+            int start = Integer.parseInt(hrefBegin.split("start=")[1]);
+            int end = Integer.parseInt(hrefEnd.split("start=")[1]);
+
+            int difference = end - start;
+
+            for (int i = 25; i < difference; i += 25)
+                finalHrefs.add(URL_PREFIX + teacherHref + "start=" + (start + i));
+
+            finalHrefs.add(hrefEnd);
+        }else{
+            finalHrefs.addAll(hrefs);
+        }
+
         // presence of "next page" button creates duplicate link
-        hrefs.remove(hrefs.size() - 1);
+        //hrefs.remove(hrefs.size() - 1);
 
         // add starting url (not present in pagination)
-        hrefs.add(0, pageURL);
+        //hrefs.add(0, pageURL);
 
         return hrefs;
     }
