@@ -1,6 +1,13 @@
 package com.suszkolabs.entity;
 
+import com.beust.ah.A;
+
+import java.util.ArrayList;
+import java.util.Objects;
+
 public class Teacher {
+
+    private static int currentId = 1;
 
     private int id;
     private String category;
@@ -8,6 +15,7 @@ public class Teacher {
     private String academicTitle;
     private double averageRating;
     private String detailsLink;
+    private ArrayList<Review> reviews;
 
     public Teacher(int id, String category, String firstName, String academicTitle, double averageRating, String detailsLink) {
         this.id = id;
@@ -16,6 +24,7 @@ public class Teacher {
         this.academicTitle = academicTitle;
         this.averageRating = averageRating;
         this.detailsLink = detailsLink;
+        this.reviews = new ArrayList<>();
     }
 
     public Teacher(String category, String firstName, String academicTitle, double averageRating, String detailsLink) {
@@ -24,21 +33,57 @@ public class Teacher {
         this.academicTitle = academicTitle;
         this.averageRating = averageRating;
         this.detailsLink = detailsLink;
+        this.reviews = new ArrayList<>();
     }
 
     public Teacher() {
+        this.reviews = new ArrayList<>();
+    }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Teacher teacher = (Teacher) o;
+        return id == teacher.id && Double.compare(teacher.averageRating, averageRating) == 0 && Objects.equals(category, teacher.category) && Objects.equals(fullName, teacher.fullName) && Objects.equals(academicTitle, teacher.academicTitle) && Objects.equals(detailsLink, teacher.detailsLink) && Objects.equals(reviews, teacher.reviews);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, category, fullName, academicTitle, averageRating, detailsLink, reviews);
     }
 
     @Override
     public String toString() {
         return "Teacher{" +
-                "category='" + category + '\'' +
+                "id=" + id +
+                ", category='" + category + '\'' +
                 ", fullName='" + fullName + '\'' +
                 ", academicTitle='" + academicTitle + '\'' +
                 ", averageRating=" + averageRating +
                 ", detailsLink='" + detailsLink + '\'' +
+                ", reviews=" + reviews +
                 '}';
+    }
+
+    public void addReview(Review review){
+        reviews.add(review);
+    }
+
+    public static int getCurrentId() {
+        return currentId;
+    }
+
+    public static void setCurrentId(int currentId) {
+        Teacher.currentId = currentId;
+    }
+
+    public ArrayList<Review> getReviews() {
+        return reviews;
+    }
+
+    public void setReviews(ArrayList<Review> reviews) {
+        this.reviews = reviews;
     }
 
     public int getId() {

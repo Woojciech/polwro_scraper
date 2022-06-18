@@ -1,5 +1,6 @@
 package com.suszkolabs.scrapper;
 
+import com.suszkolabs.entity.Review;
 import com.suszkolabs.entity.Teacher;
 import org.jsoup.Jsoup;
 import org.jsoup.Connection;
@@ -8,6 +9,9 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -77,15 +81,126 @@ public class Scrapper {
         final String POZOSTALI_URL = "https://polwro.com/f,inni,42";
 
         List<String> URLs = extractTeacherPaginationURLs(MATEMATYCY_URL, login);
-        System.out.println(URLs);
         List<Teacher> teacherModels = extractTeacherModels(URLs, login, "matematycy");
-        teacherModels.forEach(System.out::println);
+        List<Teacher> teacherTest = List.of(teacherModels.get(1));
+        System.out.println(fetchTeachersReviews(teacherTest, login));
 
-        // TODO - add equals for teacher to prevent duplicate threads
+        // TODO - add equals for teacher and prevent duplicate threads
+        // TODO - add null mechanism for teacherPaging extraction
+        // TODO - add last refresh
     }
 
-    public static List<String> extractTeacherPaginationURLs(String pageUrl, Connection.Response login) throws IOException {
-        Connection.Response homePage = Jsoup.connect(pageUrl)
+    public static List<Teacher> fetchTeachersReviews(List<Teacher> teachers, Connection.Response login) throws IOException, InterruptedException {
+
+        for(Teacher teacher: teachers) {
+            // fetch all review pages URLs starting from teacher homePage
+            String firstURL = URL_PREFIX + teacher.getDetailsLink();
+            List<String> urls = extractTeacherReviewsPaginationURLs(firstURL, login);
+
+            for (String URL : urls) {
+                Connection.Response reviewPage = Jsoup.connect(URL)
+                        .method(Connection.Method.GET)
+                        .userAgent(USER_AGENT)
+                        .cookies(login.cookies())
+                        .execute();
+
+                Thread.sleep(200);
+
+                Document doc = reviewPage.parse();
+                Elements posts = doc.select(".gradient_post");
+
+                for (Element elem : posts) {
+                    Element postContents = elem.selectFirst(".postBody");
+                    Element reviewBody = postContents.selectFirst("span[itemprop=\"reviewBody\"]");
+
+                    //String courseName = reviewBody.select(" > :first-child").text().trim();
+                    double givenRating = Double.parseDouble(postContents.selectFirst("span[itemprop=\"ratingValue\"]")
+                            .text().trim().replace(",", "."));
+                    //String title = reviewBody.select(" > :nth-child(4)").text().trim();
+                    Elements titles = reviewBody.select("span[style=\"font-weight: bold\"]");
+
+                    String courseName = "";
+                    String title = "";
+
+                    // code responsible for detecting alternative review formats
+                    if(titles.size() >= 2) {
+                        courseName = titles.get(0).text().trim();
+                        title = titles.get(1).text().trim();
+                    }else{
+                        courseName = reviewBody.select(" > :first-child").text().trim();
+                        title = reviewBody.select(" > :nth-child(4)").text().trim();
+                    }
+
+                    String review = reviewBody.text();
+                    String reviewer = elem.select(".ll").get(1).select("span").get(1).text();
+
+                    // WARNING: title and coursename modification have to be conducted AFTER review modification (review depends on those)
+                    review = review.replaceFirst(courseName, "").replaceFirst(title, "").trim();
+                    title = title.replaceFirst("Ocena opisowa:", "").replaceFirst("Descriptive rating:", "").trim();
+                    courseName = courseName.replaceFirst("Kurs:", "").replaceFirst("Course:", "").trim();
+
+                    Element postDateDiv = elem.selectFirst(".post_date");
+
+                    // INFO: date is stored as string because of the format but it may be stored as LocalDateTime as well
+                    String replaceText = postDateDiv.selectFirst("a").text();
+                    List<Integer> dateParts = Arrays.stream(postDateDiv.text().replace(replaceText, "")
+                                    .trim()
+                                    .split("[,s+:-]"))
+                                    .map(e -> Integer.parseInt(e.trim()))
+                                    .toList();
+                    LocalDateTime dateTime = LocalDateTime.of(dateParts.get(0), dateParts.get(1), dateParts.get(2), dateParts.get(3), dateParts.get(4));
+                    String postDate = dateTime.format(DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm"));
+
+                    Review finalReview = new Review(courseName, givenRating, title, review, reviewer, postDate, teacher.getId());
+
+                    System.out.println(finalReview);
+                    /*
+                    System.out.println(courseName);
+                    System.out.println(givenRating);
+                    System.out.println(title);
+                    System.out.println(review);
+                    System.out.println(reviewer);
+                    System.out.println(postDate);
+                    System.out.println("//_______________________________________________________________________//\n\n");
+                     */
+                    teacher.addReview(finalReview);
+                }
+                Thread.sleep(400);
+            }
+        }
+        return teachers;
+    }
+
+    public static List<String> extractTeacherReviewsPaginationURLs(String pageURL, Connection.Response login) throws IOException, InterruptedException {
+        Connection.Response homePage = Jsoup.connect(pageURL)
+                .method(Connection.Method.GET)
+                .cookies(login.cookies())
+                .userAgent(USER_AGENT)
+                .execute();
+
+        Thread.sleep(200);
+
+        Document doc = homePage.parse();
+
+        List<String> finalHrefs = new ArrayList<>();
+        finalHrefs.add(pageURL);
+
+        Optional<Element> elem = Optional.ofNullable(doc.selectFirst(".pagination"));
+        elem.ifPresent(element -> {
+            List<String> hrefs = element.select(".postmenu").stream().map(e -> e.attr("href")).collect(Collectors.toList());
+
+            // "next page" button generates duplicate URL
+            if(hrefs.size() > 1)
+                hrefs.remove(hrefs.size() - 1);
+
+            finalHrefs.addAll(hrefs);
+        });
+
+        return finalHrefs;
+    }
+
+    public static List<String> extractTeacherPaginationURLs(String pageURL, Connection.Response login) throws IOException {
+        Connection.Response homePage = Jsoup.connect(pageURL)
                 .method(Connection.Method.GET)
                 .cookies(login.cookies())
                 .userAgent(USER_AGENT)
@@ -97,8 +212,11 @@ public class Scrapper {
 
         List<String> hrefs = elem.stream().map(e -> String.format("%s%s", URL_PREFIX, e.attr("href"))).collect(Collectors.toList());
 
+        // presence of "next page" button creates duplicate link
+        hrefs.remove(hrefs.size() - 1);
+
         // add starting url (not present in pagination)
-        hrefs.add(0, pageUrl);
+        hrefs.add(0, pageURL);
 
         return hrefs;
     }
@@ -151,7 +269,13 @@ public class Scrapper {
 
                 teacher.setAcademicTitle(fullTitle.trim());
                 teacher.setFullName(teacherDetails);
-                teachers.add(teacher);
+
+                int currentId = Teacher.getCurrentId();
+                Teacher.setCurrentId(currentId + 1);
+                teacher.setId(currentId);
+
+                if(!teachers.contains(teacher))
+                    teachers.add(teacher);
             }
             Thread.sleep(400);
         }
