@@ -2,6 +2,7 @@ package com.suszkolabs.scrapper;
 
 import com.suszkolabs.entity.Review;
 import com.suszkolabs.entity.Teacher;
+import org.apache.ibatis.jdbc.ScriptRunner;
 import org.jsoup.Jsoup;
 import org.jsoup.Connection;
 import org.jsoup.nodes.Document;
@@ -9,6 +10,7 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.io.BufferedWriter;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.sql.DriverManager;
@@ -41,7 +43,7 @@ public class Scrapper {
     }
 
 
-    public static void main(String[] args) throws IOException, InterruptedException {
+    public static void main(String[] args) throws IOException, InterruptedException, SQLException {
 
         final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.115 Safari/537.36";
         final String USERNAME = System.getenv("username");
@@ -94,20 +96,25 @@ public class Scrapper {
         List<Teacher> teacherModels = extractTeacherModels(URLs, login, "sportowcy");
         fetchTeachersReviews(teacherModels, login);=
          */
+
         try {
-            buildDatabaseScript(login);
+            buildDatabaseScript(login, false);
         }catch (SQLException e){
             e.printStackTrace();
         }
+
 
         // TODO - add equals for teacher and prevent duplicate threads
         // TODO - add null mechanism for teacherPaging extraction
         // TODO - add last refresh
 
-        // TODO - fetchTeacherPagination -> refactor dla sytuacji z wieloma stronami ;)
+        java.sql.Connection connection = DriverManager.getConnection("jdbc:mysql://localhost:3306/test_opinie", "root", "admin");
+        ScriptRunner scriptRunner = new ScriptRunner(connection);
+        scriptRunner.runScript(new FileReader("src/main/resources/opinie_setup.sql"));
+        scriptRunner.runScript(new FileReader("src/main/resources/opinie_update_sportowcy.sql"));
     }
 
-    public static void buildDatabaseScript(Connection.Response login) throws IOException, InterruptedException, SQLException {
+    public static void buildDatabaseScript(Connection.Response login, boolean isUpdate) throws IOException, InterruptedException, SQLException {
         final String MATEMATYCY_URL = "https://polwro.com/f,matematycy,6";
         final String FIZYCY_URL = "https://polwro.com/f,fizycy,7";
         final String INFORMATYCY_URL = "https://polwro.com/f,informatycy,25";
@@ -131,19 +138,32 @@ public class Scrapper {
 
             // INFO: all pages from certain category
             List<String> teacherPagesURLs = extractTeacherPaginationURLs(URL, login);
+
             // INFO: all teachers from certain category
             List<Teacher> teacherModels = extractTeacherModels(teacherPagesURLs, login, category);
+
             // INFO: reviews of all teachers from certain category
             fetchTeachersReviews(teacherModels, login);
 
+            String fileName = "src/main/resources/opinie_setup.sql";
+
+            if(isUpdate)
+                fileName = "src/main/resources/opinie_update_" + category + ".sql";
+
             // INFO: part responsible for database setup script creation
-            try(BufferedWriter bwriter = new BufferedWriter(new FileWriter("src/main/resources/opinie_setup_test.sql", true))) {
+            try(BufferedWriter bwriter = new BufferedWriter(new FileWriter(fileName, true))) {
+
+                if(isUpdate)
+                    bwriter.write("START TRANSACTION;");
 
                 bwriter.newLine();
                 bwriter.newLine();
 
                 for (Teacher teacher : teacherModels) {
                     String queryTeacher = "INSERT INTO teacher(category, full_name, academic_title, average_rating, details_link) VALUES(?, ?, ?, ?, ?)";
+                    if(isUpdate)
+                        queryTeacher = "INSERT IGNORE INTO teacher(category, full_name, academic_title, average_rating, details_link) VALUES(?, ?, ?, ?, ?)";
+
                     PreparedStatement ps = connection.prepareStatement(queryTeacher);
                     ps.setString(1, teacher.getCategory().replace("'", "\\'"));
                     ps.setString(2, teacher.getFullName().replace("'", "\\'"));
@@ -159,6 +179,10 @@ public class Scrapper {
                         if(review.getCourseName().length() < 200 && review.getTitle().length() < 200) {
                             String queryReview = "INSERT INTO review(course_name, given_rating, title, review, reviewer, post_date, teacher_id)" +
                                     " VALUES(?, ?, ?, ?, ?, ?, ?)";
+                            if(isUpdate)
+                                queryReview = "INSERT IGNORE INTO review(course_name, given_rating, title, review, reviewer, post_date, teacher_id)" +
+                                        " VALUES(?, ?, ?, ?, ?, ?, ?)";
+
                             ps = connection.prepareStatement(queryReview);
                             ps.setString(1, review.getCourseName().replace("'", "\\'"));
                             ps.setDouble(2, review.getGivenRating());
@@ -175,9 +199,21 @@ public class Scrapper {
 
                     bwriter.newLine();
                     bwriter.newLine();
+
+                }
+
+                // INFO: date of latest refresh, used later to refresh opinions and teachers
+                if(!isUpdate) {
+                    String refreshQuery = "INSERT INTO refresh_data(refresh_date) VALUES(?)";
+                    PreparedStatement ps = connection.prepareStatement(refreshQuery);
+                    ps.setString(1, LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+
+                    bwriter.write(ps.toString().replace("com.mysql.cj.jdbc.ClientPreparedStatement:", "").trim() + ";");
+                    bwriter.newLine();
                 }
 
                 bwriter.write("COMMIT;");
+
             }catch(IOException e){
                 e.printStackTrace();
             }
@@ -202,7 +238,7 @@ public class Scrapper {
                         .cookies(login.cookies())
                         .execute();
 
-                Thread.sleep(500);
+                Thread.sleep(700);
 
                 Document doc = reviewPage.parse();
                 Elements posts = doc.select(".gradient_post");
@@ -228,14 +264,12 @@ public class Scrapper {
                     }
 
                     String review = reviewBody.text();
-                    String reviewer = elem.select(".ll").get(1).select("span").get(1).text();
+                    String reviewer = elem.select(".ll").get(1).select("span[itemprop=\"author\"]").text();
 
                     // WARNING: title and coursename modification have to be conducted AFTER review modification (review depends on those)
-                    //if(!courseName.equals("") && !title.equals("")) {
                     review = review.replaceFirst(Pattern.quote(courseName), "").replaceFirst(Pattern.quote(title), "").trim();
                     title = title.replaceFirst("Ocena opisowa:", "").replaceFirst("Descriptive rating:", "").trim();
                     courseName = courseName.replaceFirst("Kurs:", "").replaceFirst("Course:", "").trim();
-                    //}
 
                     Element postDateDiv = elem.selectFirst(".post_date");
 
@@ -279,11 +313,12 @@ public class Scrapper {
                     .map(e -> e.attr("href"))
                     .collect(Collectors.toList());
 
-            // INFO: "next page" button generates duplicate URL
-            if(hrefs.size() > 1)
-                hrefs.remove(hrefs.size() - 1);
-
             System.out.println("LOG: HREFS = " + hrefs);
+
+            // INFO: "next page" button generates duplicate URL
+            if(hrefs.size() > 1) {
+                hrefs.remove(hrefs.size() - 1);
+            }
 
             // INFO: different strategy taken when there is more than 7 hrefs (paging differs)
             if(hrefs.size() > 2) {
@@ -325,7 +360,6 @@ public class Scrapper {
 
         Elements elem = doc.select(".pagination").first().select(".postmenu");
 
-        // TODO - sportowcy fetch repair!!!!
         List<String> finalHrefs = new ArrayList<>();
         finalHrefs.add(pageURL);
 
@@ -333,15 +367,14 @@ public class Scrapper {
                 .map(e -> String.format("%s%s", URL_PREFIX, e.attr("href")))
                 .collect(Collectors.toList());
 
+        // "next page" button generates duplicate link
         if(hrefs.size() > 1)
             hrefs.remove(hrefs.size() - 1);
-
-        System.out.println("LOG: HREFS = " + hrefs);
 
         // INFO: different strategy taken when there is more than 7 hrefs (paging differs)
         if(hrefs.size() > 2) {
             hrefs.remove(hrefs.size() - 1);
-            String teacherHref = pageURL.split(URL_PREFIX)[1];
+            String teacherHref = hrefs.get(0).split(URL_PREFIX)[1].split("&start=")[0];
 
             String hrefBegin = hrefs.get(0);
             finalHrefs.add(hrefBegin);
@@ -361,13 +394,8 @@ public class Scrapper {
             finalHrefs.addAll(hrefs);
         }
 
-        // presence of "next page" button creates duplicate link
-        //hrefs.remove(hrefs.size() - 1);
-
-        // add starting url (not present in pagination)
-        //hrefs.add(0, pageURL);
-
-        return hrefs;
+        System.out.println("LOG: FINALHREFS = " + finalHrefs);
+        return finalHrefs;
     }
 
     public static List<Teacher> extractTeacherModels(List<String> teacherPaginationURLs, Connection.Response login, String category) throws IOException, InterruptedException {

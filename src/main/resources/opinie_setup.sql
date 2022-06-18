@@ -20,27 +20,30 @@
     TEXT - 65,5.. k characters is quite much but the previous tier is 255 chars so it is a must in this case
         even though it is redundant
 */
-#START TRANSACTION;
+START TRANSACTION;
 
 CREATE TABLE teacher(
-    teacherId MEDIUMINT PRIMARY KEY AUTO_INCREMENT,
-    category VARCHAR(30) NOT NULL,
-    full_name VARCHAR(80) DEFAULT NULL,
-    academic_title VARCHAR(30) DEFAULT NULL,
-    average_rating FLOAT,
-    details_link VARCHAR(50) NOT NULL
+                        teacher_id MEDIUMINT PRIMARY KEY AUTO_INCREMENT,
+                        category VARCHAR(30) NOT NULL,
+                        full_name VARCHAR(80) DEFAULT NULL,
+                        academic_title VARCHAR(30) DEFAULT NULL,
+                        average_rating FLOAT,
+                        details_link VARCHAR(50) NOT NULL
 );
 
 CREATE TABLE review(
-    reviewId MEDIUMINT PRIMARY KEY AUTO_INCREMENT,
-    course_name VARCHAR(60) DEFAULT NULL,
-    given_rating FLOAT,
-    title VARCHAR(100) DEFAULT NULL,
-    review TEXT DEFAULT NULL,
-    reviewer VARCHAR(30) DEFAULT NULL,
-    post_date DATETIME,
-    teacher_id MEDIUMINT NOT NULL,
-    FOREIGN KEY (teacher_id) REFERENCES teacher(teacherId)
+                       review_id MEDIUMINT PRIMARY KEY AUTO_INCREMENT,
+                       course_name VARCHAR(60) DEFAULT NULL,
+                       given_rating FLOAT,
+                       title VARCHAR(100) DEFAULT NULL,
+                       review TEXT DEFAULT NULL,
+                       reviewer VARCHAR(30) DEFAULT NULL,
+                       post_date DATETIME,
+                       teacher_id MEDIUMINT NOT NULL,
+                       FOREIGN KEY (teacher_id) REFERENCES teacher(teacher_id)
 );
 
-INSERT INTO teacher(category, full_name, academic_title, average_rating, details_link) VALUES('matematycy', 'Bogdan Krzysztof', 'dr', 4.77, 't,bogdan-krzysztof-dr,78')
+CREATE TABLE refresh_data(
+                             refresh_data_id INT PRIMARY KEY AUTO_INCREMENT,
+                             refresh_date DATETIME
+);
