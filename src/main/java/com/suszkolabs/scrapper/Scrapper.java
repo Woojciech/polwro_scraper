@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class Scrapper {
@@ -80,11 +81,17 @@ public class Scrapper {
         final String SPORTOWCY_URL = "https://polwro.com/f,sportowcy,12";
         final String POZOSTALI_URL = "https://polwro.com/f,inni,42";
 
-        List<String> URLs = extractTeacherPaginationURLs(MATEMATYCY_URL, login);
-        List<Teacher> teacherModels = extractTeacherModels(URLs, login, "matematycy");
-        List<Teacher> teacherTest = List.of(teacherModels.get(1));
-        System.out.println(fetchTeachersReviews(teacherTest, login));
+        long t1 = System.nanoTime();
+        List<String> URLs = extractTeacherPaginationURLs(POZOSTALI_URL, login);
+        List<Teacher> teacherModels = extractTeacherModels(URLs, login, "sportowcy");
+        //System.out.println(teacherModels.get(19));
+        //teacherModels.forEach(teacher -> System.out.println(teacher));
+        //System.out.println(teacherModels);
+        //List<Teacher> teacherTest = List.of(teacherModels.get(19), teacherModels.get(20), teacherModels.get(21));
+        System.out.println(fetchTeachersReviews(teacherModels, login));
+        long t2 = System.nanoTime();
 
+        System.out.println((t2 - t1)/1000000000);
         // TODO - add equals for teacher and prevent duplicate threads
         // TODO - add null mechanism for teacherPaging extraction
         // TODO - add last refresh
@@ -97,7 +104,9 @@ public class Scrapper {
             String firstURL = URL_PREFIX + teacher.getDetailsLink();
             List<String> urls = extractTeacherReviewsPaginationURLs(firstURL, login);
 
+            System.out.println(urls);
             for (String URL : urls) {
+                System.out.println(URL);
                 Connection.Response reviewPage = Jsoup.connect(URL)
                         .method(Connection.Method.GET)
                         .userAgent(USER_AGENT)
@@ -134,10 +143,13 @@ public class Scrapper {
                     String review = reviewBody.text();
                     String reviewer = elem.select(".ll").get(1).select("span").get(1).text();
 
+                    // TODO - unclosed group near index ... Kurs: Analiza matematyczna 1 i 2 (ćwiczenia -> is treated as invalid regex pattern
                     // WARNING: title and coursename modification have to be conducted AFTER review modification (review depends on those)
-                    review = review.replaceFirst(courseName, "").replaceFirst(title, "").trim();
-                    title = title.replaceFirst("Ocena opisowa:", "").replaceFirst("Descriptive rating:", "").trim();
-                    courseName = courseName.replaceFirst("Kurs:", "").replaceFirst("Course:", "").trim();
+                    if(!courseName.equals("") && !title.equals("")) {
+                        review = review.replaceFirst(Pattern.quote(courseName), "").replaceFirst(Pattern.quote(title), "").trim();
+                        title = title.replaceFirst("Ocena opisowa:", "").replaceFirst("Descriptive rating:", "").trim();
+                        courseName = courseName.replaceFirst("Kurs:", "").replaceFirst("Course:", "").trim();
+                    }
 
                     Element postDateDiv = elem.selectFirst(".post_date");
 
@@ -153,16 +165,7 @@ public class Scrapper {
 
                     Review finalReview = new Review(courseName, givenRating, title, review, reviewer, postDate, teacher.getId());
 
-                    System.out.println(finalReview);
-                    /*
-                    System.out.println(courseName);
-                    System.out.println(givenRating);
-                    System.out.println(title);
-                    System.out.println(review);
-                    System.out.println(reviewer);
-                    System.out.println(postDate);
-                    System.out.println("//_______________________________________________________________________//\n\n");
-                     */
+                    //System.out.println(finalReview);
                     teacher.addReview(finalReview);
                 }
                 Thread.sleep(400);
@@ -178,7 +181,7 @@ public class Scrapper {
                 .userAgent(USER_AGENT)
                 .execute();
 
-        Thread.sleep(200);
+        Thread.sleep(300);
 
         Document doc = homePage.parse();
 
@@ -186,8 +189,11 @@ public class Scrapper {
         finalHrefs.add(pageURL);
 
         Optional<Element> elem = Optional.ofNullable(doc.selectFirst(".pagination"));
+        /*
         elem.ifPresent(element -> {
-            List<String> hrefs = element.select(".postmenu").stream().map(e -> e.attr("href")).collect(Collectors.toList());
+            List<String> hrefs = element.select(".postmenu").stream()
+                    .map(e -> e.attr("href"))
+                    .collect(Collectors.toList());
 
             // "next page" button generates duplicate URL
             if(hrefs.size() > 1)
@@ -195,6 +201,61 @@ public class Scrapper {
 
             finalHrefs.addAll(hrefs);
         });
+         */
+
+        elem.ifPresent(element -> {
+            List<String> hrefs = element.select(".postmenu").stream()
+                    .map(e -> e.attr("href"))
+                    .collect(Collectors.toList());
+
+            // INFO: "next page" button generates duplicate URL
+            if(hrefs.size() > 1)
+                hrefs.remove(hrefs.size() - 1);
+
+            System.out.println("LOG: HREFS = " + hrefs);
+
+            // INFO: different strategy taken when there is more than 7 hrefs (paging differs)
+            if(hrefs.size() > 2) {
+                hrefs.remove(hrefs.size() - 1);
+                String teacherHref = pageURL.split(URL_PREFIX)[1];
+
+                String hrefBegin = hrefs.get(0);
+                finalHrefs.add(hrefBegin);
+
+                String hrefEnd = hrefs.get(hrefs.size() - 1);
+
+                int start = Integer.parseInt(hrefBegin.split("start=")[1]);
+                int end = Integer.parseInt(hrefEnd.split("start=")[1]);
+
+                int difference = end - start;
+
+                for (int i = 25; i < difference; i += 25)
+                    finalHrefs.add(URL_PREFIX + teacherHref + "start=" + (start + i));
+
+                finalHrefs.add(hrefEnd);
+            }else{
+                finalHrefs.addAll(hrefs);
+            }
+        });
+
+        System.out.println("LOG: FINALHREFS = " + finalHrefs);
+
+        /*
+        //__________________________________________________________________________________________//
+        String teacherHref = pageURL.split(URL_PREFIX)[1];
+        System.out.println(teacherHref);
+        String hrefBegin = hrefs.get(0);
+        String hrefEnd = hrefs.get(hrefs.size() - 1);
+        int start = Integer.parseInt(hrefBegin.split("start=")[1]);
+        int end = Integer.parseInt(hrefEnd.split("start=")[1]);
+
+        int difference = end - start;
+
+        for(int i = 25; i < end; i += 25){
+            hrefs.add(URL_PREFIX + teacherHref + "start=" + start + i);
+        }
+        //___________________________________________________________________________________________//
+         */
 
         return finalHrefs;
     }
@@ -210,7 +271,9 @@ public class Scrapper {
 
         Elements elem = doc.select(".pagination").first().select(".postmenu");
 
-        List<String> hrefs = elem.stream().map(e -> String.format("%s%s", URL_PREFIX, e.attr("href"))).collect(Collectors.toList());
+        List<String> hrefs = elem.stream()
+                .map(e -> String.format("%s%s", URL_PREFIX, e.attr("href")))
+                .collect(Collectors.toList());
 
         // presence of "next page" button creates duplicate link
         hrefs.remove(hrefs.size() - 1);
@@ -231,6 +294,8 @@ public class Scrapper {
                     .cookies(login.cookies())
                     .userAgent(USER_AGENT)
                     .execute();
+
+            Thread.sleep(200);
 
             Document document = teachersPage.parse();
             Elements teacherDivs = document.select(".img.folder, .img.folder_hot");
@@ -274,6 +339,7 @@ public class Scrapper {
                 Teacher.setCurrentId(currentId + 1);
                 teacher.setId(currentId);
 
+                // in case of duplicate thread (it happens sometimes)
                 if(!teachers.contains(teacher))
                     teachers.add(teacher);
             }
