@@ -2,6 +2,7 @@ package com.suszkolabs.scrapper;
 
 import com.suszkolabs.entity.Review;
 import com.suszkolabs.entity.Teacher;
+import com.suszkolabs.utils.ScrapperInitializationException;
 import org.apache.ibatis.jdbc.ScriptRunner;
 import org.jsoup.Jsoup;
 import org.jsoup.Connection;
@@ -18,20 +19,43 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-public class Scrapper {
+public final class Scrapper {
 
-    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.115 Safari/537.36";
-    private static final String USERNAME = System.getenv("username");
-    private static final String PASSWORD = System.getenv("password");
-    private static final String URL_PREFIX = "https://polwro.com/";
-    private static final Map<String, Integer> titlePriorities;
 
-    static{
+    private final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.115 Safari/537.36";
+    private final String POLWRO_USERNAME = System.getenv("usernamePolwro");
+    private final String POLWRO_PASSWORD = System.getenv("passwordPolwro");
+
+    private final String DATABASE_USERNAME = System.getenv("usernameDatabase");
+    private final String DATABASE_PASSWORD = System.getenv("passwordDatabase");
+    private final String DATABASE_CONNECTION_LINK = System.getenv("databaseConnectionLink");
+    private final java.sql.Connection connection;
+
+    private final String URL_PREFIX = "https://polwro.com/";
+    private final String MATEMATYCY_URL = "https://polwro.com/f,matematycy,6";
+    private final String FIZYCY_URL = "https://polwro.com/f,fizycy,7";
+    private final String INFORMATYCY_URL = "https://polwro.com/f,informatycy,25";
+    private final String CHEMICY_URL = "https://polwro.com/f,chemicy,8";
+    private final String ELEKTRONICY_URL = "https://polwro.com/f,elektronicy,9";
+    private final String JEZYKOWCY_URL = "https://polwro.com/f,jezykowcy,10";
+    private final String HUMANISCI_URL = "https://polwro.com/f,humanisci,11";
+    private final String SPORTOWCY_URL = "https://polwro.com/f,sportowcy,12";
+    private final String POZOSTALI_URL = "https://polwro.com/f,inni,42";
+
+
+    private final Map<String, Integer> titlePriorities;
+    private final Map<String, String> formData;
+    private Connection.Response login;
+
+    /**
+     * Initializes Scrapper, before initialization make sure proper env parameters are set
+     * [polwroUsername, polwroPassword, databaseUsername, databasePassword, databaseConnectionLink]
+     */
+    public Scrapper(){
         titlePriorities = new HashMap<>();
         titlePriorities.put("prof", 1);
         titlePriorities.put("dr", 2);
@@ -40,81 +64,61 @@ public class Scrapper {
         titlePriorities.put("mgr", 5);
         titlePriorities.put("inz", 6);
         titlePriorities.put("inż", 7);
-    }
 
-
-    public static void main(String[] args) throws IOException, InterruptedException, SQLException {
-
-        final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.115 Safari/537.36";
-        final String USERNAME = System.getenv("username");
-        final String PASSWORD = System.getenv("password");
-
-        // formData
-        /*
-        username: woojtek
-        password: HashMap<String, String> f
-        redirect: viewforum.php?f=6&start=0
-        login: Zaloguj
-         */
-        HashMap<String, String> formData = new HashMap<>();
-        formData.put("username", USERNAME);
-        formData.put("password", PASSWORD);
-        //formData.put("redirect", "viewforum.php?f=6&start=0");
+        this.formData = new HashMap<>();
+        formData.put("username", POLWRO_USERNAME);
+        formData.put("password", POLWRO_PASSWORD);
         formData.put("login", "Zaloguj");
 
-        // login part
-        //_________________________________________________________________//
-        Connection.Response loginHome = Jsoup.connect("https://polwro.com/login.php?redirect=viewforum.php&f=6&start=0")
-                .method(Connection.Method.GET)
-                .userAgent(USER_AGENT)
-                .execute();
-
-        Connection.Response login = Jsoup.connect("https://polwro.com/login.php?redirect=viewforum.php&f=6&start=0")
-                .method(Connection.Method.POST)
-                .data(formData)
-                .cookies(loginHome.cookies())
-                .userAgent(USER_AGENT)
-                .followRedirects(true)
-                .execute();
-        //_________________________________________________________________//
-
-        final String MATEMATYCY_URL = "https://polwro.com/f,matematycy,6";
-        final String FIZYCY_URL = "https://polwro.com/f,fizycy,7";
-        final String INFORMATYCY_URL = "https://polwro.com/f,informatycy,25";
-        final String CHEMICY_URL = "https://polwro.com/f,chemicy,8";
-        final String ELEKTRONICY_URL = "https://polwro.com/f,elektronicy,9";
-        final String JEZYKOWCY_URL = "https://polwro.com/f,jezykowcy,10";
-        final String HUMANISCI_URL = "https://polwro.com/f,humanisci,11";
-        final String SPORTOWCY_URL = "https://polwro.com/f,sportowcy,12";
-        final String POZOSTALI_URL = "https://polwro.com/f,inni,42";
-
-        /*
-        List<String> categoryURLs = List.of(MATEMATYCY_URL, FIZYCY_URL, INFORMATYCY_URL,
-                CHEMICY_URL, ELEKTRONICY_URL, JEZYKOWCY_URL, HUMANISCI_URL, SPORTOWCY_URL, POZOSTALI_URL);
-
-        List<String> URLs = extractTeacherPaginationURLs(POZOSTALI_URL, login);
-        List<Teacher> teacherModels = extractTeacherModels(URLs, login, "sportowcy");
-        fetchTeachersReviews(teacherModels, login);=
-         */
-
         try {
-            buildDatabaseScript(login, false);
-        }catch (SQLException e){
+            Connection.Response loginHome = Jsoup.connect("https://polwro.com/login.php?redirect=viewforum.php&f=6&start=0")
+                    .method(Connection.Method.GET)
+                    .userAgent(USER_AGENT)
+                    .execute();
+
+            login = Jsoup.connect("https://polwro.com/login.php?redirect=viewforum.php&f=6&start=0")
+                    .method(Connection.Method.POST)
+                    .data(formData)
+                    .cookies(loginHome.cookies())
+                    .userAgent(USER_AGENT)
+                    .followRedirects(true)
+                    .execute();
+
+            connection = DriverManager.getConnection(DATABASE_CONNECTION_LINK, DATABASE_USERNAME, DATABASE_PASSWORD);
+        }catch(IOException | SQLException e){
             e.printStackTrace();
+            throw new ScrapperInitializationException(formData);
         }
 
-
-        // TODO - add equals for teacher and prevent duplicate threads
-        // TODO - add null mechanism for teacherPaging extraction
-        // TODO - add last refresh
-
-        java.sql.Connection connection = DriverManager.getConnection("jdbc:mysql://localhost:3306/test_opinie", "root", "admin");
-        ScriptRunner scriptRunner = new ScriptRunner(connection);
-        scriptRunner.runScript(new FileReader("src/main/resources/opinie_setup.sql"));
-        scriptRunner.runScript(new FileReader("src/main/resources/opinie_update_sportowcy.sql"));
     }
 
-    public static void buildDatabaseScript(Connection.Response login, boolean isUpdate) throws IOException, InterruptedException, SQLException {
+    /** Builds database script(s) depending on isUpdate attribute
+     *
+     * @param isUpdate if true generates update scripts (without schema, update prepared through INSERT IGNORE) for each of the categories separately,
+     *                      otherwise generates database setup script (bulk file with all insertions and schema). Each script is transactional.
+     * @param execute if true uses apache ibatis scriptrunner and runs sql scripts on the provided database
+     * @throws SQLException insertions are setup through PreparedStatement in order to avoid SQL injection
+     * @throws IOException may be caused when writing data to .sql file
+     * @throws InterruptedException threads are used to provide timeout between requests
+     */
+    public void buildDatabaseScript(boolean isUpdate, boolean execute) throws SQLException, IOException, InterruptedException {
+        buildDatabaseScript(login, isUpdate);
+
+        if(execute){
+            ScriptRunner scriptRunner = new ScriptRunner(connection);
+            if(isUpdate){
+                List<String> suffixes = List.of("matematycy", "fizycy", "informatycy", "chemicy", "elektronicy",
+                        "jezykowcy", "humanisci", "sportowcy", "pozostali");
+                for(String suffix: suffixes)
+                    scriptRunner.runScript(new FileReader("src/main/resources/opinie_update_" + suffix + ".sql"));
+            }else {
+                scriptRunner.runScript(new FileReader("src/main/resources/opinie_setup_schema.sql"));
+                scriptRunner.runScript(new FileReader("src/main/resources/opinie_setup_data.sql"));
+            }
+        }
+    }
+
+    private void buildDatabaseScript(Connection.Response login, boolean isUpdate) throws IOException, InterruptedException, SQLException {
         final String MATEMATYCY_URL = "https://polwro.com/f,matematycy,6";
         final String FIZYCY_URL = "https://polwro.com/f,fizycy,7";
         final String INFORMATYCY_URL = "https://polwro.com/f,informatycy,25";
@@ -145,16 +149,15 @@ public class Scrapper {
             // INFO: reviews of all teachers from certain category
             fetchTeachersReviews(teacherModels, login);
 
-            String fileName = "src/main/resources/opinie_setup.sql";
+            String fileName = "src/main/resources/opinie_setup_data.sql";
 
             if(isUpdate)
                 fileName = "src/main/resources/opinie_update_" + category + ".sql";
 
             // INFO: part responsible for database setup script creation
-            try(BufferedWriter bwriter = new BufferedWriter(new FileWriter(fileName, true))) {
+            try(BufferedWriter bwriter = new BufferedWriter(new FileWriter(fileName, false))) {
 
-                if(isUpdate)
-                    bwriter.write("START TRANSACTION;");
+                bwriter.write("START TRANSACTION;");
 
                 bwriter.newLine();
                 bwriter.newLine();
@@ -217,12 +220,11 @@ public class Scrapper {
             }catch(IOException e){
                 e.printStackTrace();
             }
-            break;
         }
 
     }
 
-    public static List<Teacher> fetchTeachersReviews(List<Teacher> teachers, Connection.Response login) throws IOException, InterruptedException {
+    private List<Teacher> fetchTeachersReviews(List<Teacher> teachers, Connection.Response login) throws IOException, InterruptedException {
 
         for(Teacher teacher: teachers) {
             // INFO: fetch all review pages URLs starting from teacher homePage
@@ -292,7 +294,7 @@ public class Scrapper {
         return teachers;
     }
 
-    public static List<String> extractTeacherReviewsPaginationURLs(String pageURL, Connection.Response login) throws IOException, InterruptedException {
+    private List<String> extractTeacherReviewsPaginationURLs(String pageURL, Connection.Response login) throws IOException, InterruptedException {
         Connection.Response homePage = Jsoup.connect(pageURL)
                 .method(Connection.Method.GET)
                 .cookies(login.cookies())
@@ -349,7 +351,7 @@ public class Scrapper {
         return finalHrefs;
     }
 
-    public static List<String> extractTeacherPaginationURLs(String pageURL, Connection.Response login) throws IOException {
+    private List<String> extractTeacherPaginationURLs(String pageURL, Connection.Response login) throws IOException {
         Connection.Response homePage = Jsoup.connect(pageURL)
                 .method(Connection.Method.GET)
                 .cookies(login.cookies())
@@ -398,7 +400,7 @@ public class Scrapper {
         return finalHrefs;
     }
 
-    public static List<Teacher> extractTeacherModels(List<String> teacherPaginationURLs, Connection.Response login, String category) throws IOException, InterruptedException {
+    private List<Teacher> extractTeacherModels(List<String> teacherPaginationURLs, Connection.Response login, String category) throws IOException, InterruptedException {
         List<Teacher> teachers = new ArrayList<>();
         String[] academicTitles = {"doc", "Doc", "mgr", "Mgr", "inż", "Inż", "inz", "Inz", "hab", "Hab", "dr", "Dr", "prof", "Prof"};
 
@@ -462,7 +464,7 @@ public class Scrapper {
         return teachers;
     }
 
-    private static String constructFullTitle(List<String> titleParts){
+    private String constructFullTitle(List<String> titleParts){
         String fullTitle = "";
         Map<Integer, String> titlePartPriorities = new TreeMap<>();
 

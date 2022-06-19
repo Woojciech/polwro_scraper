@@ -20,24 +20,22 @@
     TEXT - 65,5.. k characters is quite much but the previous tier is 255 chars so it is a must in this case
         even though it is redundant
 */
-START TRANSACTION;
-
 CREATE TABLE teacher(
                         teacher_id MEDIUMINT PRIMARY KEY AUTO_INCREMENT,
                         category VARCHAR(30) NOT NULL,
-                        full_name VARCHAR(80) DEFAULT NULL,
-                        academic_title VARCHAR(30) DEFAULT NULL,
+                        full_name VARCHAR(100) DEFAULT NULL,
+                        academic_title VARCHAR(50) DEFAULT NULL,
                         average_rating FLOAT,
-                        details_link VARCHAR(50) NOT NULL
+                        details_link VARCHAR(70) NOT NULL
 );
 
 CREATE TABLE review(
                        review_id MEDIUMINT PRIMARY KEY AUTO_INCREMENT,
-                       course_name VARCHAR(60) DEFAULT NULL,
+                       course_name VARCHAR(150) DEFAULT NULL,
                        given_rating FLOAT,
-                       title VARCHAR(100) DEFAULT NULL,
+                       title VARCHAR(150) DEFAULT NULL,
                        review TEXT DEFAULT NULL,
-                       reviewer VARCHAR(30) DEFAULT NULL,
+                       reviewer VARCHAR(70) DEFAULT NULL,
                        post_date DATETIME,
                        teacher_id MEDIUMINT NOT NULL,
                        FOREIGN KEY (teacher_id) REFERENCES teacher(teacher_id)

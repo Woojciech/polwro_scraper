@@ -1,7 +1,14 @@
 package com.suszkolabs.app;
 
-public class Main {
-    public static void main(String[] args) {
+import com.suszkolabs.scrapper.Scrapper;
 
+import java.io.IOException;
+import java.sql.SQLException;
+
+public class Main {
+    public static void main(String[] args) throws SQLException, IOException, InterruptedException {
+        Scrapper scrapper = new Scrapper();
+
+        scrapper.buildDatabaseScript(false, true);
     }
 }
