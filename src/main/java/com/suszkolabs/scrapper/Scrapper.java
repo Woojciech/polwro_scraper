@@ -4,6 +4,7 @@ import com.suszkolabs.entity.Review;
 import com.suszkolabs.entity.Teacher;
 import com.suszkolabs.utils.ScrapperInitializationException;
 import org.apache.ibatis.jdbc.ScriptRunner;
+import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.Connection;
 import org.jsoup.nodes.Document;
@@ -36,15 +37,15 @@ public final class Scrapper {
     private final java.sql.Connection connection;
 
     private final String URL_PREFIX = "https://polwro.com/";
-    private final String MATEMATYCY_URL = "https://polwro.com/f,matematycy,6";
-    private final String FIZYCY_URL = "https://polwro.com/f,fizycy,7";
-    private final String INFORMATYCY_URL = "https://polwro.com/f,informatycy,25";
-    private final String CHEMICY_URL = "https://polwro.com/f,chemicy,8";
-    private final String ELEKTRONICY_URL = "https://polwro.com/f,elektronicy,9";
-    private final String JEZYKOWCY_URL = "https://polwro.com/f,jezykowcy,10";
-    private final String HUMANISCI_URL = "https://polwro.com/f,humanisci,11";
-    private final String SPORTOWCY_URL = "https://polwro.com/f,sportowcy,12";
-    private final String POZOSTALI_URL = "https://polwro.com/f,inni,42";
+//    private final String MATEMATYCY_URL = "https://polwro.com/f,matematycy,6";
+//    private final String FIZYCY_URL = "https://polwro.com/f,fizycy,7";
+//    private final String INFORMATYCY_URL = "https://polwro.com/f,informatycy,25";
+//    private final String CHEMICY_URL = "https://polwro.com/f,chemicy,8";
+//    private final String ELEKTRONICY_URL = "https://polwro.com/f,elektronicy,9";
+//    private final String JEZYKOWCY_URL = "https://polwro.com/f,jezykowcy,10";
+//    private final String HUMANISCI_URL = "https://polwro.com/f,humanisci,11";
+//    private final String SPORTOWCY_URL = "https://polwro.com/f,sportowcy,12";
+//    private final String POZOSTALI_URL = "https://polwro.com/f,inni,42";
 
 
     private final Map<String, Integer> titlePriorities;
@@ -92,6 +93,14 @@ public final class Scrapper {
 
     }
 
+    /*
+    public static void main(String[] args) throws IOException, InterruptedException {
+        Scrapper scrapper = new Scrapper();
+        scrapper.extractTeacherReviewsPaginationURLs("https://polwro.com/t,pisarska-gubernat-barbara-mgr,216", scrapper.login);
+        //System.out.println("test");
+    }
+     */
+
     /** Builds database script(s) depending on isUpdate attribute
      *
      * @param isUpdate if true generates update scripts (without schema, update prepared through INSERT IGNORE) for each of the categories separately,
@@ -101,16 +110,22 @@ public final class Scrapper {
      * @throws IOException may be caused when writing data to .sql file
      * @throws InterruptedException threads are used to provide timeout between requests
      */
-    public void buildDatabaseScript(boolean isUpdate, boolean execute) throws SQLException, IOException, InterruptedException {
-        buildDatabaseScript(login, isUpdate);
+    public void buildDatabaseScript(boolean isUpdate, boolean execute, List<String> categoryURLs) throws SQLException, IOException, InterruptedException {
+        // INFO: extract chosen categories names
+        List<String> categoryNames = categoryURLs.stream()
+                .map(URL -> URL.split(",")[1])
+                .toList();
+        buildDatabaseScript(login, isUpdate, categoryURLs, categoryNames);
 
         if(execute){
             ScriptRunner scriptRunner = new ScriptRunner(connection);
             if(isUpdate){
+                /*
                 List<String> suffixes = List.of("matematycy", "fizycy", "informatycy", "chemicy", "elektronicy",
                         "jezykowcy", "humanisci", "sportowcy", "pozostali");
-                for(String suffix: suffixes)
-                    scriptRunner.runScript(new FileReader("src/main/resources/opinie_update_" + suffix + ".sql"));
+                 */
+                for(String category: categoryNames)
+                    scriptRunner.runScript(new FileReader("src/main/resources/opinie_update_" + category + ".sql"));
             }else {
                 scriptRunner.runScript(new FileReader("src/main/resources/opinie_setup_schema.sql"));
                 scriptRunner.runScript(new FileReader("src/main/resources/opinie_setup_data.sql"));
@@ -118,23 +133,19 @@ public final class Scrapper {
         }
     }
 
-    private void buildDatabaseScript(Connection.Response login, boolean isUpdate) throws IOException, InterruptedException, SQLException {
-        final String MATEMATYCY_URL = "https://polwro.com/f,matematycy,6";
-        final String FIZYCY_URL = "https://polwro.com/f,fizycy,7";
-        final String INFORMATYCY_URL = "https://polwro.com/f,informatycy,25";
-        final String CHEMICY_URL = "https://polwro.com/f,chemicy,8";
-        final String ELEKTRONICY_URL = "https://polwro.com/f,elektronicy,9";
-        final String JEZYKOWCY_URL = "https://polwro.com/f,jezykowcy,10";
-        final String HUMANISCI_URL = "https://polwro.com/f,humanisci,11";
-        final String SPORTOWCY_URL = "https://polwro.com/f,sportowcy,12";
-        final String POZOSTALI_URL = "https://polwro.com/f,inni,42";
-
-        java.sql.Connection connection = DriverManager.getConnection("jdbc:mysql://localhost:3306/test_opinie", "root", "admin");
-
-        List<String> categoryURLs = List.of(SPORTOWCY_URL, MATEMATYCY_URL, FIZYCY_URL, INFORMATYCY_URL,
+    private void buildDatabaseScript(Connection.Response login, boolean isUpdate, List<String> categoryURLs, List<String> categoryNames) throws IOException, InterruptedException, SQLException {
+        /*
+        List<String> categoryURLs = List.of(MATEMATYCY_URL, FIZYCY_URL, INFORMATYCY_URL,
                 CHEMICY_URL, ELEKTRONICY_URL, JEZYKOWCY_URL, HUMANISCI_URL, SPORTOWCY_URL, POZOSTALI_URL);
-        List<String> categoryNames = List.of("sportowcy", "matematycy", "fizycy", "informatycy", "chemicy", "elektronicy",
+        List<String> categoryNames = List.of("matematycy", "fizycy", "informatycy", "chemicy", "elektronicy",
                 "językowcy", "humaniści", "sportowcy", "pozostali");
+         */
+
+        /*
+        List<String> categoryNames = categoryURLs.stream()
+                .map(URL -> URL.split(",")[1])
+                .toList();
+         */
 
         for(int i = 0; i < categoryURLs.size(); i++){
             String URL = categoryURLs.get(i);
@@ -202,7 +213,6 @@ public final class Scrapper {
 
                     bwriter.newLine();
                     bwriter.newLine();
-
                 }
 
                 // INFO: date of latest refresh, used later to refresh opinions and teachers
@@ -234,13 +244,32 @@ public final class Scrapper {
             System.out.println(urls);
             for (String URL : urls) {
                 System.out.println(URL);
-                Connection.Response reviewPage = Jsoup.connect(URL)
-                        .method(Connection.Method.GET)
-                        .userAgent(USER_AGENT)
-                        .cookies(login.cookies())
-                        .execute();
 
-                Thread.sleep(700);
+                Connection.Response reviewPage = null;
+
+                int safetyCounter = 0;
+                boolean isFetched = false;
+                while(!isFetched && safetyCounter < 25) {
+                    try {
+                        reviewPage = Jsoup.connect(URL)
+                                .method(Connection.Method.GET)
+                                .userAgent(USER_AGENT)
+                                .cookies(login.cookies())
+                                .execute();
+                        isFetched = true;
+                    } catch (HttpStatusException e) {
+                        System.out.println("Connection unreachable, another attempt in progress, failures: " + safetyCounter);
+                        Thread.sleep(500);
+                        safetyCounter++;
+                    }
+                }
+
+                if(reviewPage == null){
+                    System.out.println("WARNING: connection unavailable, URL omitted: " + URL);
+                    continue;
+                }
+
+                Thread.sleep(500);
 
                 Document doc = reviewPage.parse();
                 Elements posts = doc.select(".gradient_post");
@@ -288,20 +317,44 @@ public final class Scrapper {
                     Review finalReview = new Review(courseName, givenRating, title, review, reviewer, postDate, teacher.getId());
                     teacher.addReview(finalReview);
                 }
-                Thread.sleep(400);
+                Thread.sleep(500);
             }
         }
         return teachers;
     }
 
     private List<String> extractTeacherReviewsPaginationURLs(String pageURL, Connection.Response login) throws IOException, InterruptedException {
+        Connection.Response homePage = null;
+
+        int safetyCounter = 0;
+        boolean isFetched = false;
+        while(!isFetched && safetyCounter < 25) {
+            try {
+                homePage = Jsoup.connect(pageURL)
+                        .method(Connection.Method.GET)
+                        .cookies(login.cookies())
+                        .userAgent(USER_AGENT)
+                        .execute();
+                isFetched = true;
+            } catch (HttpStatusException e) {
+                System.out.println("Connection unreachable, another attempt in progress, failures: " + safetyCounter);
+                Thread.sleep(500);
+                safetyCounter++;
+            }
+        }
+
+        if(homePage == null){
+            System.out.println("WARNING: connection unavailable, URL omitted: " + pageURL);
+            return List.of();
+        }
+
+        /*
         Connection.Response homePage = Jsoup.connect(pageURL)
                 .method(Connection.Method.GET)
                 .cookies(login.cookies())
                 .userAgent(USER_AGENT)
                 .execute();
-
-        Thread.sleep(300);
+         */
 
         Document doc = homePage.parse();
 
@@ -318,13 +371,19 @@ public final class Scrapper {
             System.out.println("LOG: HREFS = " + hrefs);
 
             // INFO: "next page" button generates duplicate URL
+            boolean isRemoved = false;
             if(hrefs.size() > 1) {
                 hrefs.remove(hrefs.size() - 1);
+                isRemoved = true;
             }
+
 
             // INFO: different strategy taken when there is more than 7 hrefs (paging differs)
             if(hrefs.size() > 2) {
-                hrefs.remove(hrefs.size() - 1);
+                if(!isRemoved) {
+                    hrefs.remove(hrefs.size() - 1);
+                }
+
                 String teacherHref = pageURL.split(URL_PREFIX)[1];
 
                 String hrefBegin = hrefs.get(0);
@@ -351,12 +410,38 @@ public final class Scrapper {
         return finalHrefs;
     }
 
-    private List<String> extractTeacherPaginationURLs(String pageURL, Connection.Response login) throws IOException {
+    private List<String> extractTeacherPaginationURLs(String pageURL, Connection.Response login) throws IOException, InterruptedException {
+        Connection.Response homePage = null;
+
+        int safetyCounter = 0;
+        boolean isFetched = false;
+        while(!isFetched && safetyCounter < 25) {
+            try {
+                homePage = Jsoup.connect(pageURL)
+                        .method(Connection.Method.GET)
+                        .cookies(login.cookies())
+                        .userAgent(USER_AGENT)
+                        .execute();
+                isFetched = true;
+            } catch (HttpStatusException e) {
+                System.out.println("Connection unreachable, another attempt in progress, failures: " + safetyCounter);
+                Thread.sleep(500);
+                safetyCounter++;
+            }
+        }
+
+        if(homePage == null){
+            System.out.println("WARNING: connection unavailable, URL omitted: " + pageURL);
+            return List.of();
+        }
+
+        /*
         Connection.Response homePage = Jsoup.connect(pageURL)
                 .method(Connection.Method.GET)
                 .cookies(login.cookies())
                 .userAgent(USER_AGENT)
                 .execute();
+         */
 
         Document doc = homePage.parse();
 
@@ -405,13 +490,39 @@ public final class Scrapper {
         String[] academicTitles = {"doc", "Doc", "mgr", "Mgr", "inż", "Inż", "inz", "Inz", "hab", "Hab", "dr", "Dr", "prof", "Prof"};
 
         for(String URL: teacherPaginationURLs){
+            Connection.Response teachersPage = null;
+
+            int safetyCounter = 0;
+            boolean isFetched = false;
+            while(!isFetched && safetyCounter < 25) {
+                try {
+                    teachersPage = Jsoup.connect(URL)
+                            .method(Connection.Method.GET)
+                            .cookies(login.cookies())
+                            .userAgent(USER_AGENT)
+                            .execute();
+                    isFetched = true;
+                } catch (HttpStatusException e) {
+                    System.out.println("Connection unreachable, another attempt in progress, failures: " + safetyCounter);
+                    Thread.sleep(500);
+                    safetyCounter++;
+                }
+            }
+
+            if(teachersPage == null){
+                System.out.println("WARNING: connection unavailable, URL omitted: " + URL);
+                continue;
+            }
+
+            /*
             Connection.Response teachersPage = Jsoup.connect(URL)
                     .method(Connection.Method.GET)
                     .cookies(login.cookies())
                     .userAgent(USER_AGENT)
                     .execute();
+             */
 
-            Thread.sleep(200);
+            Thread.sleep(500);
 
             Document document = teachersPage.parse();
             Elements teacherDivs = document.select(".img.folder, .img.folder_hot");
@@ -459,7 +570,7 @@ public final class Scrapper {
                 if(!teachers.contains(teacher))
                     teachers.add(teacher);
             }
-            Thread.sleep(400);
+            Thread.sleep(500);
         }
         return teachers;
     }
